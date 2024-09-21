@@ -108,20 +108,36 @@ void updateFirebase() {
 }
 
 void fetchFirebaseData() {
-  // Fetch Firebase data for valve control
+  // Fetch Firebase data for valve control and trigger relays accordingly
   if (Firebase.getInt(firebaseData, "/valves/valve1")) {
     if (firebaseData.intData() == 1) {
-      digitalWrite(RELAY_1_PIN, HIGH);  // Open solenoid 1
+      // If solenoid 1 is not currently watering
+      if (millis() - lastWaterTime1 >= wateringDuration) {
+        Serial.println("Valve 1 Opened from Firebase: Watering for 3 seconds...");
+        digitalWrite(RELAY_1_PIN, HIGH);  // Open solenoid 1
+        lastWaterTime1 = millis();        // Record the time of opening
+      }
     } else {
-      digitalWrite(RELAY_1_PIN, LOW);   // Close solenoid 1
+      // Only close the valve if we're not in the middle of a watering delay
+      if (millis() - lastWaterTime1 >= wateringDuration) {
+        digitalWrite(RELAY_1_PIN, LOW);   // Close solenoid 1
+      }
     }
   }
 
   if (Firebase.getInt(firebaseData, "/valves/valve2")) {
     if (firebaseData.intData() == 1) {
-      digitalWrite(RELAY_2_PIN, HIGH);  // Open solenoid 2
+      // If solenoid 2 is not currently watering
+      if (millis() - lastWaterTime2 >= wateringDuration) {
+        Serial.println("Valve 2 Opened from Firebase: Watering for 3 seconds...");
+        digitalWrite(RELAY_2_PIN, HIGH);  // Open solenoid 2
+        lastWaterTime2 = millis();        // Record the time of opening
+      }
     } else {
-      digitalWrite(RELAY_2_PIN, LOW);   // Close solenoid 2
+      // Only close the valve if we're not in the middle of a watering delay
+      if (millis() - lastWaterTime2 >= wateringDuration) {
+        digitalWrite(RELAY_2_PIN, LOW);   // Close solenoid 2
+      }
     }
   }
 }
