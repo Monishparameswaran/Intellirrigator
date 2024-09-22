@@ -1,143 +1,80 @@
-#include <SoftwareSerial.h>
-#include <ESP8266WiFi.h>
-#include <FirebaseESP8266.h>
+#include <ESP8266WiFi.h>  // Include the ESP8266 Wi-Fi library
+#include <FirebaseESP8266.h>  // Include Firebase library
 
-const char* ssid = "Madhav";
-const char* password = "6305991151";
+// Define your Wi-Fi credentials
+const char* ssid = "Madhav";        // Replace with your Wi-Fi SSID
+const char* password = "6305991151"; // Replace with your Wi-Fi password
 
-#define FIREBASE_HOST "sensor-data-26db9-default-rtdb.firebaseio.com"
-#define FIREBASE_AUTH "UZjoSxe0bUUAcHbeKqLqY4zgUF136rWXOLkAEIDU"
-// Define sensor pins and relay control pins
-#define SOIL_SENSOR_1_PIN A0
-#define SOIL_SENSOR_2_PIN D1
-#define RELAY_1_PIN D2
-#define RELAY_2_PIN D3
-
-int moisture1;
-int moisture2;
-int threshold = 20;  // Threshold value for triggering solenoids
+// Define Firebase credentials
+#define FIREBASE_HOST "sensor-data-26db9-default-rtdb.firebaseio.com"  // Replace with your Firebase project URL
+#define FIREBASE_AUTH "AIzaSyAG3yXXSSjtwxCa6RPQbIjlQU51ICGZCMQ"         // Replace with your Firebase database secret
 
 FirebaseData firebaseData;
 
+FirebaseAuth auth;
+FirebaseConfig config;
+
+const int soil1Pin = A0;   // A0 for Soil Moisture Sensor 1
+const int relayPin = D5;    // Relay control pin (adjust pin as needed)
+
 void setup() {
-  // Initialize Serial
-  Serial.begin(115200);
-
-  // Initialize the relay pins
-  pinMode(RELAY_1_PIN, OUTPUT);
-  pinMode(RELAY_2_PIN, OUTPUT);
-
-  // Ensure relays are off initially
-  digitalWrite(RELAY_1_PIN, LOW);
-  digitalWrite(RELAY_2_PIN, LOW);
+  Serial.begin(9600);  // Start serial communication at 9600 baud
+  pinMode(relayPin, OUTPUT);  // Set the relay pin as output
+  digitalWrite(relayPin, HIGH); // Ensure the relay is off initially
 
   // Connect to Wi-Fi
-  connectToWiFi();
+  WiFi.begin(ssid, password);
+  Serial.print("Connecting to WiFi");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");  // Print dots while connecting
+  }
+  Serial.println("\nConnected to Wi-Fi!");
 
-  // Connect to Firebase
-  Firebase.begin(FIREBASE_HOST, FIREBASE_AUTH);
+  // Initialize Firebase
+  config.database_url = FIREBASE_HOST;
+  config.signer.tokens.legacy_token = FIREBASE_AUTH;
+  Firebase.begin(&config, &auth);
   Firebase.reconnectWiFi(true);
-
-  Serial.println("Setup done!");
+  delay(1000);
 }
 
 void loop() {
-  // Read soil moisture levels
-  moisture1 = analogRead(SOIL_SENSOR_1_PIN); // Reading from sensor 1
-  moisture2 = analogRead(SOIL_SENSOR_2_PIN); // Reading from sensor 2
+  int soil1Value = analogRead(soil1Pin);  // Read the analog value from A0
+  int scaledSoilValue = map(soil1Value, 0, 1023, 1, 100);
+  Serial.print("Soil 1 Value: ");
+  Serial.println(soil1Value);  // Print the raw value for debugging
 
-  // Normalize sensor values (0 to 1024) for more readable values, optional
-  moisture1 = map(moisture1, 0, 1024, 0, 100);  // Assuming values 0 to 100% moisture
-  moisture2 = map(moisture2, 0, 1024, 0, 100);
-
-  // Check moisture levels and control the relays
-  controlRelays(moisture1, moisture2);
-
-  // Update Firebase with the current data
-  updateFirebase();
-
-  // Check for any changes in valve state from Firebase
-  fetchFirebaseData();
-
-  // Small delay to avoid overwhelming Firebase
-  delay(5000);  // 5 seconds delay
-}
-
-void connectToWiFi() {
-  Serial.print("Connecting to ");
-  Serial.println(ssid);
-  
-  WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(1000);
-    Serial.print(".");
-  }
-  
-  Serial.println("");
-  Serial.println("WiFi connected");
-  Serial.println(WiFi.localIP());
-}
-
-void controlRelays(int moisture1, int moisture2) {
-  // If moisture1 is below threshold, trigger relay 1
-  if (moisture1 < threshold) {
-    digitalWrite(RELAY_1_PIN, HIGH);  // Activate solenoid 1
-  } else {
-    digitalWrite(RELAY_1_PIN, LOW);   // Deactivate solenoid 1
-  }
-
-  // If moisture2 is below threshold, trigger relay 2
-  if (moisture2 < threshold) {
-    digitalWrite(RELAY_2_PIN, HIGH);  // Activate solenoid 2
-  } else {
-    digitalWrite(RELAY_2_PIN, LOW);   // Deactivate solenoid 2
-  }
-}
-
-void updateFirebase() {
-  // Push moisture levels to Firebase
-  Firebase.setInt(firebaseData, "/sensors/moisture1", moisture1);
-  Firebase.setInt(firebaseData, "/sensors/moisture2", moisture2);
-
-  // Push relay states to Firebase (as valve states)
-  int valve1State = digitalRead(RELAY_1_PIN);
-  int valve2State = digitalRead(RELAY_2_PIN);
-
-  Firebase.setInt(firebaseData, "/valves/valve1", valve1State);
-  Firebase.setInt(firebaseData, "/valves/valve2", valve2State);
-}
-
-void fetchFirebaseData() {
-  // Fetch Firebase data for valve control and trigger relays accordingly
-  if (Firebase.getInt(firebaseData, "/valves/valve1")) {
-    if (firebaseData.intData() == 1) {
-      // If solenoid 1 is not currently watering
-      if (millis() - lastWaterTime1 >= wateringDuration) {
-        Serial.println("Valve 1 Opened from Firebase: Watering for 3 seconds...");
-        digitalWrite(RELAY_1_PIN, HIGH);  // Open solenoid 1
-        lastWaterTime1 = millis();        // Record the time of opening
+  // Read valve1 value from Firebase
+  if (Firebase.getInt(firebaseData, "/valve1")) {
+    if (firebaseData.dataAvailable()) {
+      int valveStatus = firebaseData.intData();  // Get valve1 value
+      if (valveStatus == 1) {
+        digitalWrite(relayPin, LOW);  // Open the relay
+        Serial.println("Relay opened from Firebase command.");
+      } else {
+        digitalWrite(relayPin, HIGH);  // Close the relay
+        Serial.println("Relay closed from Firebase command.");
       }
     } else {
-      // Only close the valve if we're not in the middle of a watering delay
-      if (millis() - lastWaterTime1 >= wateringDuration) {
-        digitalWrite(RELAY_1_PIN, LOW);   // Close solenoid 1
-      }
+      Serial.println("No data available for valve1.");
     }
+  } else {
+    Serial.println("Failed to read valve1 from Firebase.");
   }
 
-  if (Firebase.getInt(firebaseData, "/valves/valve2")) {
-    if (firebaseData.intData() == 1) {
-      // If solenoid 2 is not currently watering
-      if (millis() - lastWaterTime2 >= wateringDuration) {
-        Serial.println("Valve 2 Opened from Firebase: Watering for 3 seconds...");
-        digitalWrite(RELAY_2_PIN, HIGH);  // Open solenoid 2
-        lastWaterTime2 = millis();        // Record the time of opening
-      }
-    } else {
-      // Only close the valve if we're not in the middle of a watering delay
-      if (millis() - lastWaterTime2 >= wateringDuration) {
-        digitalWrite(RELAY_2_PIN, LOW);   // Close solenoid 2
-      }
-    }
+  // Update Firebase with the soil moisture value
+  Firebase.setInt(firebaseData, "/soil1", 100-scaledSoilValue);
+
+  // Check if the soil moisture value indicates dryness
+  if (soil1Value > 600) {  // Threshold for dry soil
+    // Update Firebase to indicate watering is in progress
+    Firebase.setInt(firebaseData, "/valve1", 1); // Set valve1 to 1
+    digitalWrite(relayPin, LOW);  // Turn on the relay (open valve)
+    delay(3000);                   // Water for 3 seconds
+    digitalWrite(relayPin, HIGH); // Turn off the relay (close valve)
+    Firebase.setInt(firebaseData, "/valve1", 0); // Set valve1 to 0
   }
+
+  delay(1000);  // Wait for 1 second before the next reading
 }
